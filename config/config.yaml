@@ -9,7 +9,7 @@ allowed_domains:
 
 crawl_limits:
   max_depth: 3
-  max_pages: 10  # Temporarily reduced for testing - increase after verifying processing works
+  max_pages: 10000  # Temporarily reduced for testing - increase after verifying processing works
   rate_per_second: 2.0
 
 url_normalization_rules: {}
