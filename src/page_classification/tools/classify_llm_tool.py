@@ -235,7 +235,20 @@ def classify_llm_tool(
     confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
     matched_rules = list(data.get("matched_rules", []) or [])
     rationale = str(data.get("rationale", ""))
-    evidence = list(data.get("evidence", []) or [])
+    
+    # Convert evidence to strings (handle both strings and objects)
+    evidence_raw = data.get("evidence", []) or []
+    evidence = []
+    for item in evidence_raw:
+        if isinstance(item, str):
+            evidence.append(item)
+        elif isinstance(item, dict):
+            # Convert dict to string representation
+            evidence_str = json.dumps(item, ensure_ascii=False)
+            evidence.append(evidence_str)
+        else:
+            evidence.append(str(item))
+    
     needs_review = bool(data.get("needs_review", False))
     missing_signals = list(data.get("missing_signals", []) or [])
 
