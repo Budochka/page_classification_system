@@ -31,7 +31,7 @@ llm_provider_config:
   model: gpt-5-nano
   api_key_env: OPENAI_API_KEY
   # temperature: 0.0  # GPT-5 models don't support temperature parameter (only default 1)
-  max_tokens: 2048  # GPT-5 models use max_completion_tokens instead (code handles conversion). Balanced for speed: allows reasoning tokens (~1000-1500) + response (~500-1000)
+  max_tokens: 4096  # GPT-5 models use max_completion_tokens instead (code handles conversion). Balanced: allows reasoning tokens (~2000-2500) + response (~500-1000) to avoid empty responses
 
 output_config:
   storage_path: ./output/results.jsonl
