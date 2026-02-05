@@ -35,33 +35,9 @@ CRITICAL: You must return ONLY valid JSON. Do not include markdown code blocks, 
 
 If uncertain or the page doesn't fit any specific audience, return ["OTHER"]."""
 
-USER_PROMPT_TEMPLATE = """Ruleset (use as guidelines, but analyze content first):
-{ruleset}
-
-Allowed labels: {allowed_labels}
-
-Page package:
-{page_package}
-
-Analyze the page content carefully:
-1. Read the text_excerpt, headings, and key_paragraphs to understand what the page is about
-2. Check the meta information (title, description, h1) for context
-3. Consider the structure (breadcrumbs, nav hints, CTAs) to understand the page's purpose
-4. Use term_scores and other signals as supporting evidence, not the primary factor
-5. Match rules that align with your content analysis
-
-Return ONLY valid JSON (no markdown, no code blocks, no extra text):
-{{
-  "labels": ["LABEL1", "LABEL2"],  // Array of labels. Can be multiple, but if OTHER, must be ONLY ["OTHER"]
-  "confidence": 0.0-1.0,
-  "matched_rules": ["R1", "R2"],
-  "rationale": "Brief explanation based on content analysis",
-  "evidence": ["field=value", ...],
-  "needs_review": false,
-  "missing_signals": []
-}}
-
-Remember: Return ONLY the JSON object, nothing else."""
+USER_PROMPT_TEMPLATE = """Ruleset: {ruleset}
+Page package: {page_package}
+Classify based on content. Return JSON only: {{"labels": ["LABEL"], "confidence": 0.0-1.0, "matched_rules": [], "rationale": "", "evidence": [], "needs_review": false, "missing_signals": []}}"""
 
 
 def _load_ruleset(path: str | Path) -> str:

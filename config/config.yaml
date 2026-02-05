@@ -28,10 +28,10 @@ term_dictionaries_path: config/term_dictionaries
 
 llm_provider_config:
   provider: openai
-  model: gpt-5-nano
+  model: gpt-5-nano  # Use gpt-4o-mini for faster processing (~1-2s vs ~15-25s), but GPT-5-nano may be more accurate
   api_key_env: OPENAI_API_KEY
-  # temperature: 0.0  # GPT-5 models don't support temperature parameter (only default 1)
-  max_tokens: 4096  # GPT-5 models use max_completion_tokens instead (code handles conversion). Balanced: allows reasoning tokens (~2000-2500) + response (~500-1000) to avoid empty responses
+  # temperature: 0.0  # GPT-5 models don't support temperature parameter (only default 1). For gpt-4o-mini, use 0.0 for determinism
+  max_tokens: 3072  # GPT-5 models use max_completion_tokens instead (code handles conversion). Balanced: allows reasoning tokens (~2000-2500) + response (~500-1000) to avoid empty responses
 
 output_config:
   storage_path: ./output/results.jsonl

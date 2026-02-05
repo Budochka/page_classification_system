@@ -79,7 +79,7 @@ class PagePackage(BaseModel):
             "content_type": self.content_type,
             "meta": self.meta.model_dump(),
             "content": {
-                "text_excerpt": self.content.text_excerpt[:2000],  # Limit for context
+                "text_excerpt": self.content.text_excerpt[:2000],  # Keep full context for accuracy
                 "headings": self.content.headings,
                 "key_paragraphs": self.content.key_paragraphs,
             },
