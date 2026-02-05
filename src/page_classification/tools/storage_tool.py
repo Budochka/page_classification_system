@@ -1,6 +1,7 @@
 """Storage tool - persist validated classification results."""
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from ..models.classification_result import StoredClassification
 def init_storage(output_path: str, export_format: str = "jsonl") -> None:
     """
     Initialize storage - clear existing file to start fresh.
-    For JSONL: delete file if exists.
+    For JSONL: delete file if exists, then create empty file.
     For SQLite: clear table or delete file.
     """
     path = Path(output_path)
@@ -29,9 +30,11 @@ def init_storage(output_path: str, export_format: str = "jsonl") -> None:
                 # Table doesn't exist yet, delete file to recreate
                 path.unlink()
     else:
-        # For JSONL and other formats, delete file to start fresh
+        # For JSONL and other formats, delete file to start fresh, then create empty file
         if path.exists():
             path.unlink()
+        # Create empty file immediately so it exists from the start
+        path.touch()
 
 
 def storage_tool(
@@ -42,6 +45,7 @@ def storage_tool(
     """
     Persist validated classification result.
     Supports jsonl append mode.
+    Writes and flushes immediately after each record.
     """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,8 +55,15 @@ def storage_tool(
         data["processed_at"] = data["processed_at"].isoformat()
 
     if export_format == "jsonl":
-        with open(path, "a", encoding="utf-8") as f:
+        # Use append mode and flush immediately
+        with open(path, "a", encoding="utf-8", buffering=1) as f:  # Line buffering
             f.write(json.dumps(data, ensure_ascii=False) + "\n")
+            f.flush()  # Explicit flush to ensure data is written immediately
+            try:
+                os.fsync(f.fileno())  # Force write to disk
+            except (OSError, AttributeError):
+                # Some systems don't support fsync or file might not have fileno
+                pass
     else:
         # Fallback: append to JSON array (simplified)
         if path.exists():
@@ -61,8 +72,14 @@ def storage_tool(
         else:
             arr = []
         arr.append(data)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8", buffering=1) as f:
             json.dump(arr, f, ensure_ascii=False, indent=2)
+            f.flush()  # Explicit flush
+            try:
+                os.fsync(f.fileno())  # Force write to disk
+            except (OSError, AttributeError):
+                # Some systems don't support fsync or file might not have fileno
+                pass
 
 
 def storage_tool_sqlite(
