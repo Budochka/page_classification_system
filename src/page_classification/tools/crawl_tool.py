@@ -56,21 +56,49 @@ def crawl_tool(
             seen.add(norm)
             queue.append((norm, None, 0))
 
-    # Try sitemap first
+    # Try sitemap first - handle both regular sitemaps and sitemap indexes
+    sitemap_urls_to_process: list[str] = []
     for base_url in start_urls:
         parsed = urlparse(base_url)
         sitemap_url = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
-        try:
-            with httpx.Client(timeout=30, follow_redirects=True, trust_env=False) as client:
+        sitemap_urls_to_process.append(sitemap_url)
+    
+    # Process sitemaps (including following sitemap indexes)
+    processed_sitemaps: set[str] = set()
+    with httpx.Client(timeout=30, follow_redirects=True, trust_env=False) as client:
+        while sitemap_urls_to_process and len(records) < limits.max_pages:
+            sitemap_url = sitemap_urls_to_process.pop(0)
+            if sitemap_url in processed_sitemaps:
+                continue
+            processed_sitemaps.add(sitemap_url)
+            
+            try:
                 r = client.get(sitemap_url)
-                if r.status_code == 200 and "xml" in r.headers.get("content-type", ""):
-                    soup = BeautifulSoup(r.text, "xml")
+                if r.status_code != 200 or "xml" not in r.headers.get("content-type", ""):
+                    continue
+                
+                soup = BeautifulSoup(r.text, "xml")
+                
+                # Check if this is a sitemap index (has <sitemap> tags)
+                sitemap_tags = soup.find_all("sitemap")
+                if sitemap_tags:
+                    # This is a sitemap index - extract referenced sitemap URLs
+                    for sitemap in sitemap_tags:
+                        loc = sitemap.find("loc")
+                        if loc:
+                            ref_sitemap_url = loc.get_text(strip=True)
+                            if ref_sitemap_url not in processed_sitemaps:
+                                sitemap_urls_to_process.append(ref_sitemap_url)
+                else:
+                    # Regular sitemap - extract URLs
                     for loc in soup.find_all("loc"):
                         u = loc.get_text(strip=True)
                         norm = normalize_url(u, rules=rules)
                         if norm not in seen:
                             if allowed and urlparse(norm).netloc not in allowed:
                                 continue
+                            if len(records) >= limits.max_pages:
+                                break
                             seen.add(norm)
                             records.append(
                                 URLRecord(
@@ -81,12 +109,12 @@ def crawl_tool(
                                     state=ProcessingState.DISCOVERED,
                                 )
                             )
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     # Crawl internal links with depth limit
     depth = 0
-    while queue and len(records) + len([r for r in records if r.state == ProcessingState.DISCOVERED]) < limits.max_pages:
+    while queue and len(records) < limits.max_pages:
         batch = queue[: limits.max_pages - len(records)]
         queue = queue[len(batch) :]
         for url, from_url, d in batch:

@@ -9,7 +9,7 @@ allowed_domains:
 
 crawl_limits:
   max_depth: 3
-  max_pages: 100
+  max_pages: 20000  # Increased to crawl more pages from the site
   rate_per_second: 2.0
 
 url_normalization_rules: {}
