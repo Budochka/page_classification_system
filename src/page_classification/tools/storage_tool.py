@@ -81,7 +81,7 @@ def storage_tool_sqlite(
             url TEXT PRIMARY KEY,
             final_url TEXT,
             http_status INTEGER,
-            label TEXT,
+            labels TEXT,
             confidence REAL,
             matched_rules TEXT,
             rationale TEXT,
@@ -101,7 +101,7 @@ def storage_tool_sqlite(
     conn.execute(
         """
         INSERT OR REPLACE INTO classifications
-        (url, final_url, http_status, label, confidence, matched_rules, rationale,
+        (url, final_url, http_status, labels, confidence, matched_rules, rationale,
          evidence, needs_review, ruleset_version, model_version, processed_at,
          fetch_mode, content_hash)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -110,7 +110,7 @@ def storage_tool_sqlite(
             data["url"],
             data["final_url"],
             data.get("http_status"),
-            data["label"],
+            json.dumps(data["labels"]),  # Store labels as JSON array
             data["confidence"],
             json.dumps(data["matched_rules"]),
             data["rationale"],

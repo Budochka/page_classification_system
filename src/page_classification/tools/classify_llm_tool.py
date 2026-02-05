@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """You are a page classifier for an exchange website.
-Classify each page into EXACTLY ONE of these labels based on target audience:
+Classify each page into one or more labels based on target audience:
 - INVESTOR_BEGINNER: Retail/non-qualified investors, educational, onboarding
 - INVESTOR_QUALIFIED: Qualified/experienced investors, complex instruments, higher risks
 - ISSUER_BEGINNER: Issuers that have never done a placement (IPO, first bond, initial listing)
@@ -24,12 +24,15 @@ Classify each page into EXACTLY ONE of these labels based on target audience:
 - PROFESSIONAL: Professional participants (brokers, management companies, funds, clearing/depository)
 - OTHER: Pages that do not clearly belong to any audience above
 
-IMPORTANT: Analyze the actual page content (text_excerpt, headings, key_paragraphs, meta) to understand the page's purpose and target audience. Do not rely solely on pre-computed signals (term_scores, has_api_keywords). Read and understand the content to make an informed classification.
+IMPORTANT RULES:
+1. If a page clearly belongs to multiple audiences, return multiple labels (e.g., ["INVESTOR_BEGINNER", "ISSUER_BEGINNER"])
+2. If a page is OTHER, return ONLY ["OTHER"] (never combine OTHER with other labels)
+3. Analyze the actual page content (text_excerpt, headings, key_paragraphs, meta) to understand the page's purpose and target audience
+4. Do not rely solely on pre-computed signals (term_scores, has_api_keywords). Read and understand the content to make an informed classification.
 
 CRITICAL: You must return ONLY valid JSON. Do not include markdown code blocks, do not include any explanatory text before or after the JSON. Return ONLY the JSON object.
 
-Priority order (higher overrides lower): PROFESSIONAL > ISSUER_ADVANCED > ISSUER_BEGINNER > INVESTOR_QUALIFIED > INVESTOR_BEGINNER > OTHER.
-If uncertain, return OTHER."""
+If uncertain or the page doesn't fit any specific audience, return ["OTHER"]."""
 
 USER_PROMPT_TEMPLATE = """Ruleset (use as guidelines, but analyze content first):
 {ruleset}
@@ -48,7 +51,7 @@ Analyze the page content carefully:
 
 Return ONLY valid JSON (no markdown, no code blocks, no extra text):
 {{
-  "label": "EXACTLY_ONE_LABEL",
+  "labels": ["LABEL1", "LABEL2"],  // Array of labels. Can be multiple, but if OTHER, must be ONLY ["OTHER"]
   "confidence": 0.0-1.0,
   "matched_rules": ["R1", "R2"],
   "rationale": "Brief explanation based on content analysis",
@@ -82,7 +85,7 @@ def classify_llm_tool(
 ) -> ClassificationResult:
     """
     Invoke LLM with ruleset and page_package.
-    Returns strict JSON: label, confidence, matched_rules, rationale, evidence, needs_review, missing_signals.
+    Returns strict JSON: labels (list), confidence, matched_rules, rationale, evidence, needs_review, missing_signals.
     """
     ruleset_path = ruleset_path or config.ruleset_path
     ruleset = _load_ruleset(ruleset_path)
@@ -101,7 +104,7 @@ def classify_llm_tool(
     if not api_key:
         # Fallback: return OTHER with needs_review when no API key
         return ClassificationResult(
-            label="OTHER",
+            labels=["OTHER"],
             confidence=0.0,
             matched_rules=[],
             rationale="No LLM API key configured. Manual review required.",
@@ -142,7 +145,7 @@ def classify_llm_tool(
             logger.error(f"Empty LLM response. Finish reason: {response.choices[0].finish_reason}")
             logger.error(f"Response object: {response}")
             return ClassificationResult(
-                label="OTHER",
+                labels=["OTHER"],
                 confidence=0.0,
                 matched_rules=[],
                 rationale="Empty response from LLM",
@@ -166,7 +169,7 @@ def classify_llm_tool(
         logger.error(f"LLM API error: {error_type}: {error_msg}", exc_info=True)
         
         return ClassificationResult(
-            label="OTHER",
+            labels=["OTHER"],
             confidence=0.0,
             matched_rules=[],
             rationale=f"LLM error ({error_type}): {error_msg}",
@@ -205,7 +208,7 @@ def classify_llm_tool(
         logger.error(f"LLM response (first 1000 chars): {content[:1000]}")
         logger.error(f"Cleaned response (first 500 chars): {raw[:500]}")
         return ClassificationResult(
-            label="OTHER",
+            labels=["OTHER"],
             confidence=0.0,
             matched_rules=[],
             rationale=f"Invalid JSON from LLM: {str(e)[:100]}",
@@ -214,10 +217,32 @@ def classify_llm_tool(
             missing_signals=["parse_error"],
         )
 
-    # Validate and coerce
-    label = str(data.get("label", "OTHER")).upper()
-    if label not in ALLOWED_LABELS:
-        label = "OTHER"
+    # Validate and coerce labels
+    labels_raw = data.get("labels", data.get("label", "OTHER"))  # Support both "label" and "labels" for backward compatibility
+    if isinstance(labels_raw, str):
+        labels_raw = [labels_raw]  # Convert single label to list
+    labels = [str(l).upper().strip() for l in labels_raw if l]
+    
+    # Validate labels
+    valid_labels = []
+    has_other = False
+    for lbl in labels:
+        lbl_upper = lbl.upper()
+        if lbl_upper in ALLOWED_LABELS:
+            if lbl_upper == "OTHER":
+                has_other = True
+            valid_labels.append(lbl_upper)
+    
+    # Enforce rule: OTHER cannot be combined with other labels
+    if has_other:
+        if len(valid_labels) > 1:
+            logger.warning(f"OTHER cannot be combined with other labels. Using only OTHER. Original: {labels}")
+        valid_labels = ["OTHER"]
+    
+    # If no valid labels, default to OTHER
+    if not valid_labels:
+        valid_labels = ["OTHER"]
+    
     confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
     matched_rules = list(data.get("matched_rules", []) or [])
     rationale = str(data.get("rationale", ""))
@@ -226,7 +251,7 @@ def classify_llm_tool(
     missing_signals = list(data.get("missing_signals", []) or [])
 
     return ClassificationResult(
-        label=label,
+        labels=valid_labels,
         confidence=confidence,
         matched_rules=matched_rules,
         rationale=rationale,

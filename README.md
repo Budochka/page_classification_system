@@ -1,10 +1,10 @@
 # Page Classification System for Exchange Websites
 
-Automatically crawls an exchange website, processes each page, and classifies it into **exactly one target audience category** using rule-based logic supported by an LLM. Optimized for large Russian-language websites.
+Automatically crawls an exchange website, processes each page, and classifies it into **one or more target audience categories** using rule-based logic supported by an LLM. Optimized for large Russian-language websites.
 
 ## Classification Labels
 
-Each page is classified into exactly one of:
+Each page can be classified with **one or more labels** from the following categories:
 
 | Label | Description |
 |-------|-------------|
@@ -14,6 +14,12 @@ Each page is classified into exactly one of:
 | `ISSUER_ADVANCED` | Issuers with completed placements (disclosure, corporate actions) |
 | `PROFESSIONAL` | Brokers, management companies, funds, clearing/depository |
 | `OTHER` | Generic news, errors, mixed or unclear pages |
+
+### Multiple Labels
+
+- Pages can have **multiple labels** if they serve multiple audiences (e.g., `["INVESTOR_BEGINNER", "ISSUER_BEGINNER"]`)
+- The `OTHER` label **cannot be combined** with other labels - if a page is `OTHER`, it will only have `["OTHER"]`
+- The LLM analyzes page content to determine which audiences the page serves
 
 ## Architecture
 
@@ -99,13 +105,15 @@ py run.py -c config/config.yaml -v
 
 ### Rules
 
-Edit `config/ruleset.json`. Rules are applied in priority order:
+Edit `config/ruleset.json`. Rules help guide classification, but the LLM analyzes content to determine which labels apply. A page can match multiple rules and receive multiple labels. Priority order (for reference):
 1. PROFESSIONAL
 2. ISSUER_ADVANCED
 3. ISSUER_BEGINNER
 4. INVESTOR_QUALIFIED
 5. INVESTOR_BEGINNER
 6. OTHER
+
+**Important:** The `OTHER` label cannot be combined with other labels. If a page is classified as `OTHER`, it will only have `["OTHER"]` as its label.
 
 ### Russian Keyword Dictionaries
 
@@ -124,11 +132,25 @@ One keyword per line. Used for `term_scores` in the page package.
 Results are stored as JSONL (one JSON object per line) or SQLite. Each record includes:
 
 - `url`, `final_url`, `http_status`
-- `label`, `confidence`
+- `labels` (array of strings), `confidence`
 - `matched_rules`, `rationale`, `evidence`
 - `needs_review`
 - `ruleset_version`, `model_version`, `processed_at`
 - `fetch_mode`, `content_hash`
+
+**Example output:**
+```json
+{
+  "url": "https://example.com/page",
+  "labels": ["INVESTOR_BEGINNER", "ISSUER_BEGINNER"],
+  "confidence": 0.85,
+  "matched_rules": ["R5", "R8"],
+  "rationale": "Page serves both beginner investors and first-time issuers",
+  ...
+}
+```
+
+**Note:** For backward compatibility, the `label` property (singular) is available and returns the first label in the `labels` array.
 
 ## LLM Model Support
 

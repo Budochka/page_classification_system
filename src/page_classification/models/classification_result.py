@@ -29,13 +29,20 @@ LABEL_PRIORITY = {
 class ClassificationResult(BaseModel):
     """Strict JSON output from classify_llm_tool."""
 
-    label: str = Field(..., description="Exactly one of allowed_labels")
+    labels: list[str] = Field(..., description="List of labels. If OTHER, must be exactly ['OTHER']. Otherwise can be multiple labels.")
     confidence: float = Field(..., ge=0.0, le=1.0)
     matched_rules: list[str] = Field(default_factory=list)
     rationale: str = Field(default="")
     evidence: list[str] = Field(default_factory=list)
     needs_review: bool = Field(default=False)
     missing_signals: list[str] = Field(default_factory=list)
+    
+    @property
+    def label(self) -> str:
+        """Backward compatibility: return first label or 'OTHER'."""
+        if not self.labels:
+            return "OTHER"
+        return self.labels[0]
 
 
 class StoredClassification(BaseModel):
@@ -44,7 +51,7 @@ class StoredClassification(BaseModel):
     url: str
     final_url: str
     http_status: Optional[int]
-    label: str
+    labels: list[str] = Field(..., description="List of labels. If OTHER, must be exactly ['OTHER'].")
     confidence: float
     matched_rules: list[str]
     rationale: str
@@ -55,3 +62,10 @@ class StoredClassification(BaseModel):
     processed_at: datetime = Field(default_factory=datetime.utcnow)
     fetch_mode: str = "http"
     content_hash: Optional[str] = None
+    
+    @property
+    def label(self) -> str:
+        """Backward compatibility: return first label or 'OTHER'."""
+        if not self.labels:
+            return "OTHER"
+        return self.labels[0]

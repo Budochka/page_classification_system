@@ -30,9 +30,18 @@ def validate_tool(
             for m in re.finditer(r'"R\d+"', content):
                 ruleset_rule_ids.add(m.group(0).strip('"'))
 
-    # 1. Label validity
-    if result.label not in ALLOWED_LABELS:
-        errors.append(f"Invalid label: {result.label}")
+    # 1. Labels validity
+    if not result.labels:
+        errors.append("Labels list cannot be empty")
+    else:
+        for lbl in result.labels:
+            if lbl not in ALLOWED_LABELS:
+                errors.append(f"Invalid label: {lbl}")
+        
+        # Check OTHER rule: OTHER cannot be combined with other labels
+        has_other = "OTHER" in result.labels
+        if has_other and len(result.labels) > 1:
+            errors.append("OTHER cannot be combined with other labels")
 
     # 2. Confidence in [0, 1]
     if not (0 <= result.confidence <= 1):
@@ -46,7 +55,8 @@ def validate_tool(
                 pass
 
     # 4. Non-OTHER without rules → needs_review
-    if result.label != "OTHER" and not result.matched_rules and not result.needs_review:
+    has_other = "OTHER" in result.labels
+    if not has_other and not result.matched_rules and not result.needs_review:
         errors.append("Non-OTHER classification without matched_rules must have needs_review=true")
 
     # 5. Confidence < 0.5 → needs_review
@@ -58,8 +68,14 @@ def validate_tool(
 
 def apply_validation_fixes(result: ClassificationResult) -> ClassificationResult:
     """Apply fixes for validation failures (set needs_review, etc.)."""
-    if result.label != "OTHER" and not result.matched_rules:
+    has_other = "OTHER" in result.labels
+    if not has_other and not result.matched_rules:
         result = result.model_copy(update={"needs_review": True})
     if result.confidence < 0.5:
         result = result.model_copy(update={"needs_review": True})
+    
+    # Fix OTHER combination issue
+    if has_other and len(result.labels) > 1:
+        result = result.model_copy(update={"labels": ["OTHER"]})
+    
     return result

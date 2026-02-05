@@ -129,7 +129,7 @@ class MCPAgent:
             url=rec.url,
             final_url=final_url,
             http_status=http_status,
-            label=classification.label,
+            labels=classification.labels,
             confidence=classification.confidence,
             matched_rules=classification.matched_rules,
             rationale=classification.rationale,
