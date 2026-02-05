@@ -190,21 +190,44 @@ def classify_llm_tool(
                     raw = raw[start_idx:i+1]
                     break
     
+    # Fix common JSON issues: mismatched quotes in strings
+    import re
+    # Fix: "text' -> "text" (double quote starts, single quote ends)
+    # This pattern matches: " followed by any chars (including escaped quotes) ending with '
+    raw = re.sub(r'("(?:[^"\\]|\\.)*?)\'', r'\1"', raw)
+    # Fix: 'text" -> "text" (single quote starts, double quote ends in value)
+    raw = re.sub(r':\s*\'([^\']*?)"', r': "\1"', raw)
+    # Also fix any remaining single quotes that should be double quotes in JSON string values
+    # This is a more aggressive fix for cases where the entire string is single-quoted
+    raw = re.sub(r':\s*\'([^\']*)\'', r': "\1"', raw)
+    
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error: {e}")
-        logger.error(f"LLM response (first 1000 chars): {content[:1000]}")
-        logger.error(f"Cleaned response (first 500 chars): {raw[:500]}")
-        return ClassificationResult(
-            labels=["OTHER"],
-            confidence=0.0,
-            matched_rules=[],
-            rationale=f"Invalid JSON from LLM: {str(e)[:100]}",
-            evidence=[],
-            needs_review=True,
-            missing_signals=["parse_error"],
-        )
+        # Try one more aggressive fix: replace all mismatched quote patterns
+        # Fix strings that start with " but end with ' before comma/brace/bracket (common LLM mistake)
+        # Pattern: "text' followed by , } or ]
+        raw_fixed = re.sub(r'("(?:[^"\\]|\\.)*?)\'\s*([,}\]])', r'\1"\2', raw)
+        # Fix strings that start with ' but end with " (less common)
+        raw_fixed = re.sub(r':\s*\'([^\']*?)"\s*([,}\]])', r': "\1"\2', raw_fixed)
+        
+        try:
+            data = json.loads(raw_fixed)
+            logger.warning(f"Fixed JSON quote mismatch and successfully parsed")
+        except json.JSONDecodeError as e2:
+            logger.error(f"JSON parse error: {e}")
+            logger.error(f"LLM response (first 1000 chars): {content[:1000]}")
+            logger.error(f"Cleaned response (first 500 chars): {raw[:500]}")
+            logger.error(f"Fixed response (first 500 chars): {raw_fixed[:500]}")
+            return ClassificationResult(
+                labels=["OTHER"],
+                confidence=0.0,
+                matched_rules=[],
+                rationale=f"Invalid JSON from LLM: {str(e)[:100]}",
+                evidence=[],
+                needs_review=True,
+                missing_signals=["parse_error"],
+            )
 
     # Validate and coerce labels
     labels_raw = data.get("labels", data.get("label", "OTHER"))  # Support both "label" and "labels" for backward compatibility
@@ -238,19 +261,53 @@ def classify_llm_tool(
     
     # Convert evidence to strings (handle both strings and objects)
     evidence_raw = data.get("evidence", []) or []
+    if not isinstance(evidence_raw, list):
+        logger.warning(f"Evidence is not a list, got {type(evidence_raw)}. Converting to list.")
+        evidence_raw = [evidence_raw] if evidence_raw else []
+    
     evidence = []
-    for item in evidence_raw:
+    for idx, item in enumerate(evidence_raw):
         if isinstance(item, str):
             evidence.append(item)
         elif isinstance(item, dict):
             # Convert dict to string representation
-            evidence_str = json.dumps(item, ensure_ascii=False)
-            evidence.append(evidence_str)
+            try:
+                evidence_str = json.dumps(item, ensure_ascii=False)
+                evidence.append(evidence_str)
+                logger.debug(f"Converted evidence[{idx}] dict to JSON string: {evidence_str[:100]}")
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Failed to convert evidence[{idx}] dict to JSON: {e}. Using str() instead.")
+                evidence.append(str(item))
+        elif isinstance(item, (list, tuple)):
+            # Handle nested lists/tuples
+            evidence.append(json.dumps(item, ensure_ascii=False))
         else:
+            logger.warning(f"Evidence[{idx}] is unexpected type {type(item)}, converting with str()")
             evidence.append(str(item))
+    
+    # Ensure all evidence items are strings (final safety check)
+    evidence = [str(e) for e in evidence]
+    
+    # Double-check: if any evidence item is still not a string, log and convert
+    for idx, item in enumerate(evidence):
+        if not isinstance(item, str):
+            logger.error(f"Evidence[{idx}] is not a string after conversion: {type(item)} = {item}. Converting with str().")
+            evidence[idx] = str(item)
+    
+    # Final validation: log evidence types before creating ClassificationResult
+    evidence_types = [type(e).__name__ for e in evidence]
+    if not all(isinstance(e, str) for e in evidence):
+        logger.error(f"Evidence contains non-string items before ClassificationResult creation. Types: {evidence_types}")
+        logger.error(f"Evidence values: {evidence}")
+        evidence = [str(e) for e in evidence]
     
     needs_review = bool(data.get("needs_review", False))
     missing_signals = list(data.get("missing_signals", []) or [])
+
+    # Final validation before creating ClassificationResult
+    if not all(isinstance(e, str) for e in evidence):
+        logger.error(f"Evidence still contains non-string items: {[type(e) for e in evidence]}")
+        evidence = [str(e) for e in evidence]
 
     return ClassificationResult(
         labels=valid_labels,
