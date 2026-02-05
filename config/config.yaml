@@ -1,0 +1,43 @@
+# Page Classification System - Configuration
+
+start_urls:
+  - https://www.moex.com/
+
+allowed_domains:
+  - www.moex.com
+  - moex.com
+
+crawl_limits:
+  max_depth: 3
+  max_pages: 100
+  rate_per_second: 2.0
+
+url_normalization_rules: {}
+
+render_policy:
+  min_text_chars: 300
+  spa_markers:
+    - __NEXT_DATA__
+    - data-reactroot
+    - __NUXT__
+    - ng-version
+  force_render: false
+
+ruleset_path: config/ruleset.json
+term_dictionaries_path: config/term_dictionaries
+
+llm_provider_config:
+  provider: openai
+  model: gpt-5-nano
+  api_key_env: OPENAI_API_KEY
+  # temperature: 0.0  # GPT-5 models don't support temperature parameter (only default 1)
+  max_tokens: 4096  # GPT-5 models use max_completion_tokens instead (code handles conversion). Increased to allow for reasoning tokens + response
+
+output_config:
+  storage_path: ./output/results.jsonl
+  export_format: jsonl
+  text_excerpt_max_length: 5000
+
+retry_policy:
+  max_attempts: 3
+  backoff_seconds: 2.0

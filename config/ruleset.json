@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "priority_order": ["PROFESSIONAL", "ISSUER_ADVANCED", "ISSUER_BEGINNER", "INVESTOR_QUALIFIED", "INVESTOR_BEGINNER", "OTHER"],
+  "rules": [
+    {"id": "R1", "label": "PROFESSIONAL", "condition": "signals.has_api_keywords OR term_scores.professional >= 3", "description": "Professional terminology, API/FIX"},
+    {"id": "R2", "label": "PROFESSIONAL", "condition": "nav/breadcrumbs contain 'участникам', 'брокерам', 'API'", "description": "Navigation indicates professional"},
+    {"id": "R3", "label": "ISSUER_ADVANCED", "condition": "term_scores.issuer_advanced >= 3", "description": "Disclosure, dividends, corporate actions"},
+    {"id": "R4", "label": "ISSUER_ADVANCED", "condition": "breadcrumbs/nav contain 'раскрытие', 'эмитенты'", "description": "Issuer advanced structure"},
+    {"id": "R5", "label": "ISSUER_BEGINNER", "condition": "term_scores.issuer_beginner >= 3", "description": "IPO, listing preparation"},
+    {"id": "R6", "label": "ISSUER_BEGINNER", "condition": "cta_texts contain 'Подать заявку на листинг'", "description": "First-time issuer CTA"},
+    {"id": "R7", "label": "INVESTOR_QUALIFIED", "condition": "term_scores.investor_qualified >= 3", "description": "Qualified investor terms"},
+    {"id": "R8", "label": "INVESTOR_BEGINNER", "condition": "term_scores.investor_beginner >= 3", "description": "Educational investor content"},
+    {"id": "R9", "label": "INVESTOR_BEGINNER", "condition": "meta contains 'для начинающих', 'основы'", "description": "Beginner meta"},
+    {"id": "R10", "label": "OTHER", "condition": "default", "description": "Fallback for unclear pages"}
+  ]
+}
