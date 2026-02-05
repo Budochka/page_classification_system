@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 import httpx
@@ -137,7 +138,19 @@ def classify_llm_tool(
             create_params["max_tokens"] = llm_config.max_tokens
             create_params["temperature"] = llm_config.temperature
         
+        # Time the LLM call
+        start_time = time.time()
+        logger.debug("Calling LLM API for %s...", page_package.url)
         response = client.chat.completions.create(**create_params)
+        elapsed = time.time() - start_time
+        
+        # Log token usage and timing
+        usage = response.usage
+        logger.info("LLM call completed in %.2fs for %s - prompt: %d tokens, completion: %d tokens (reasoning: %d)", 
+                   elapsed, page_package.url, 
+                   usage.prompt_tokens, usage.completion_tokens,
+                   getattr(usage.completion_tokens_details, 'reasoning_tokens', 0) if hasattr(usage, 'completion_tokens_details') else 0)
+        
         content = response.choices[0].message.content
         
         # Check if content is None or empty

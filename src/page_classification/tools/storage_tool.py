@@ -1,11 +1,14 @@
 """Storage tool - persist validated classification results."""
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 
 from ..models.classification_result import StoredClassification
+
+logger = logging.getLogger(__name__)
 
 
 def init_storage(output_path: str, export_format: str = "jsonl") -> None:
@@ -14,8 +17,9 @@ def init_storage(output_path: str, export_format: str = "jsonl") -> None:
     For JSONL: delete file if exists, then create empty file.
     For SQLite: clear table or delete file.
     """
-    path = Path(output_path)
+    path = Path(output_path).resolve()  # Make absolute
     path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Initializing storage at %s", path)
     
     if output_path.endswith(".db"):
         # For SQLite, clear the table (or delete file to recreate)
@@ -26,15 +30,19 @@ def init_storage(output_path: str, export_format: str = "jsonl") -> None:
                 conn.execute("DELETE FROM classifications")
                 conn.commit()
                 conn.close()
+                logger.info("Cleared SQLite database at %s", path)
             except sqlite3.OperationalError:
                 # Table doesn't exist yet, delete file to recreate
                 path.unlink()
+                logger.info("Deleted existing SQLite file at %s", path)
     else:
         # For JSONL and other formats, delete file to start fresh, then create empty file
         if path.exists():
             path.unlink()
+            logger.info("Deleted existing file at %s", path)
         # Create empty file immediately so it exists from the start
         path.touch()
+        logger.info("Created empty file at %s", path)
 
 
 def storage_tool(
@@ -47,39 +55,74 @@ def storage_tool(
     Supports jsonl append mode.
     Writes and flushes immediately after each record.
     """
-    path = Path(output_path)
+    path = Path(output_path).resolve()  # Make absolute - same as init_storage
     path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Storing result for %s to %s", result.url, path)
 
-    data = result.model_dump(mode="json")
-    if isinstance(data.get("processed_at"), datetime):
-        data["processed_at"] = data["processed_at"].isoformat()
+    try:
+        # Ensure path is absolute and exists
+        path = path.resolve()
+        if not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        
+        data = result.model_dump(mode="json")
+        if isinstance(data.get("processed_at"), datetime):
+            data["processed_at"] = data["processed_at"].isoformat()
 
-    if export_format == "jsonl":
-        # Use append mode and flush immediately
-        with open(path, "a", encoding="utf-8", buffering=1) as f:  # Line buffering
-            f.write(json.dumps(data, ensure_ascii=False) + "\n")
-            f.flush()  # Explicit flush to ensure data is written immediately
-            try:
-                os.fsync(f.fileno())  # Force write to disk
-            except (OSError, AttributeError):
-                # Some systems don't support fsync or file might not have fileno
-                pass
-    else:
-        # Fallback: append to JSON array (simplified)
-        if path.exists():
-            with open(path, encoding="utf-8") as f:
-                arr = json.load(f)
+        if export_format == "jsonl":
+            # Use append mode and flush immediately
+            json_str = json.dumps(data, ensure_ascii=False) + "\n"
+            logger.debug("Writing %d bytes to %s for URL %s", len(json_str), path, result.url)
+            
+            with open(path, "a", encoding="utf-8") as f:
+                bytes_written = f.write(json_str)
+                f.flush()  # Explicit flush to ensure data is written immediately
+                try:
+                    os.fsync(f.fileno())  # Force write to disk
+                except (OSError, AttributeError):
+                    # Some systems don't support fsync or file might not have fileno
+                    pass
+            
+            # Verify file was written
+            if path.exists():
+                file_size = path.stat().st_size
+                logger.debug("File %s now has %d bytes after writing %s", path, file_size, result.url)
+            else:
+                logger.error("File %s does not exist after write attempt!", path)
+            
+            logger.debug("Stored result for %s to %s", result.url, path)
         else:
+            # Fallback: append to JSON array (simplified)
             arr = []
-        arr.append(data)
-        with open(path, "w", encoding="utf-8", buffering=1) as f:
-            json.dump(arr, f, ensure_ascii=False, indent=2)
-            f.flush()  # Explicit flush
-            try:
-                os.fsync(f.fileno())  # Force write to disk
-            except (OSError, AttributeError):
-                # Some systems don't support fsync or file might not have fileno
-                pass
+            if path.exists():
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        content = f.read().strip()
+                        if content:
+                            # Try to parse as JSON array
+                            arr = json.loads(content)
+                            # Ensure it's a list
+                            if not isinstance(arr, list):
+                                logger.warning("File %s contains non-list JSON, converting to list", path)
+                                arr = [arr] if arr else []
+                except json.JSONDecodeError:
+                    # File might be JSONL format or corrupted, start fresh
+                    logger.warning("Could not parse %s as JSON array, starting fresh", path)
+                    arr = []
+            
+            arr.append(data)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(arr, f, ensure_ascii=False, indent=2)
+                f.flush()  # Explicit flush
+                try:
+                    os.fsync(f.fileno())  # Force write to disk
+                except (OSError, AttributeError):
+                    # Some systems don't support fsync or file might not have fileno
+                    pass
+            logger.debug("Stored result for %s to %s (JSON array)", result.url, path)
+    except Exception as e:
+        logger.error("Failed to store result for %s to %s: %s", result.url, path, e, exc_info=True)
+        raise
 
 
 def storage_tool_sqlite(

@@ -1,5 +1,6 @@
 """Crawl tool - collect URLs from sitemap and internal links."""
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -9,6 +10,8 @@ from bs4 import BeautifulSoup
 
 from ..config.loader import Config
 from ..models.url_record import URLRecord, ProcessingState
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_url(
@@ -32,10 +35,18 @@ def normalize_url(
 def crawl_tool(
     config: Config,
     start_urls: list[str] | None = None,
+    process_callback: callable | None = None,
 ) -> list[URLRecord]:
     """
     Collect URLs from sitemap.xml and internal links.
     Normalize, deduplicate, enforce domain and depth limits.
+    
+    Args:
+        config: Configuration object
+        start_urls: URLs to start crawling from
+        process_callback: Optional callback(url, html, final_url, http_status, content_type) -> StoredClassification | None
+                         Called immediately when a page is fetched during crawling to process it.
+                         If provided, pages are processed during crawl instead of being fetched twice.
     """
     start_urls = start_urls or config.start_urls
     if not start_urls:
@@ -64,9 +75,12 @@ def crawl_tool(
         sitemap_urls_to_process.append(sitemap_url)
     
     # Process sitemaps (including following sitemap indexes)
+    logger.info("Starting sitemap processing...")
     processed_sitemaps: set[str] = set()
     with httpx.Client(timeout=30, follow_redirects=True, trust_env=False) as client:
         while sitemap_urls_to_process and len(records) < limits.max_pages:
+            logger.debug("Processing sitemap %d/%d, found %d URLs so far", 
+                        len(processed_sitemaps) + 1, len(sitemap_urls_to_process) + len(processed_sitemaps), len(records))
             sitemap_url = sitemap_urls_to_process.pop(0)
             if sitemap_url in processed_sitemaps:
                 continue
@@ -113,8 +127,15 @@ def crawl_tool(
                 pass
 
     # Crawl internal links with depth limit
+    logger.info("Sitemap processing complete. Found %d URLs from sitemaps. Starting link crawling...", len(records))
+    logger.info("Queue has %d URLs to crawl, max_pages limit: %d", len(queue), limits.max_pages)
     depth = 0
+    processed_count = 0
     while queue and len(records) < limits.max_pages:
+        processed_count += 1
+        if processed_count % 10 == 0:
+            logger.info("Crawling progress: processed %d pages, found %d URLs, queue size: %d (target: %d)", 
+                       processed_count, len(records), len(queue), limits.max_pages)
         batch = queue[: limits.max_pages - len(records)]
         queue = queue[len(batch) :]
         for url, from_url, d in batch:
@@ -138,6 +159,23 @@ def crawl_tool(
                     r = client.get(url)
                     if r.status_code != 200:
                         continue
+                    
+                    # Process page immediately if callback provided (avoids double-fetching)
+                    # Only process HTML pages, skip XML, binary, etc.
+                    content_type = r.headers.get("content-type", "application/octet-stream")
+                    if process_callback and "html" in content_type.lower():
+                        try:
+                            process_callback(
+                                url=url,
+                                html=r.text,
+                                final_url=str(r.url),
+                                http_status=r.status_code,
+                                content_type=content_type,
+                            )
+                        except Exception as e:
+                            logger.warning("Processing callback failed for %s: %s", url, e)
+                    
+                    # Extract links for further crawling
                     soup = BeautifulSoup(r.text, "lxml")
                     for a in soup.find_all("a", href=True):
                         href = a["href"].strip()
@@ -152,8 +190,11 @@ def crawl_tool(
                 pass
 
     # Deduplicate by url, keep sitemap-discovered first
+    logger.info("Crawl complete. Deduplicating %d URLs...", len(records))
     by_url: dict[str, URLRecord] = {}
     for rec in records:
         if rec.url not in by_url:
             by_url[rec.url] = rec
-    return list(by_url.values())[: limits.max_pages]
+    result = list(by_url.values())[: limits.max_pages]
+    logger.info("Crawl finished. Returning %d unique URLs (limit: %d)", len(result), limits.max_pages)
+    return result
